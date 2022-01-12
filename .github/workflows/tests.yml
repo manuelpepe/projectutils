@@ -27,7 +27,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest tests/ --cov=pab --cov-report xml --cov-report term
+        pytest tests/ --cov=projectutils --cov-report xml --cov-report term
 
     - name: Run pre-commit checks
       run: |
