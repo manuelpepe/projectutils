@@ -98,4 +98,6 @@ config.get("nested.string")
 config.get("string")
 # 'loaded from json'
 
+config.get("nested")
+# {'nested': 'loaded from env'}
 ```

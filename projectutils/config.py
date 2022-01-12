@@ -1,3 +1,98 @@
+"""
+This module provides a structure for a configurable application.
+You can create a customized :class:`Config` object passing any :class:`ConfigSource`
+you need (like :class:`JSONSource` and :class:`ENVSource`) and a config schema.
+
+Here's an example of a simple app that uses this module:
+
+``schema.json``:
+
+.. code:: json
+
+    {
+        "string": {"doc": "String config", "format": "string", "default": "DEFAULT"},
+        "integer": {"doc": "Integer config", "format": "int", "default": 1},
+        "float": {"doc": "Float config", "format": "float", "default": 1.1},
+        "list": {"doc": "List config", "format": "list", "default": ["a", "b", "c"]},
+        "bool": {"doc": "Bool config", "format": "bool", "default": true},
+        "nested.string": {"doc": "String config", "format": "string", "default": "DEFAULT"},
+    }
+
+
+``/etc/myapp/config.json``:
+
+.. code:: json
+
+    {
+        "float": 2.2,
+        "string": "loaded from json",
+        "nested": {
+            "string": "loaded from json"
+        }
+    }
+
+
+
+``/etc/myapp/.env``:
+
+.. code:: bash
+
+    MYAPP_CONF_LIST="e,n,v"
+    MYAPP_CONF_BOOL="False"
+    MYAPP_CONF_NESTED_STRING="loaded from env"
+
+
+``app.py``:
+
+.. code:: python
+
+    import json
+    from pathlib import Path
+    from projectutils.config import Config, ENVSource, JSONSource
+
+
+    # Setup includes loading the schema
+    # and defining some params used in sources.
+    with open("schema.json", "r") as fp:
+        schema = json.load(fp)
+
+    envs_prefix = "MYAPP_CONF_"
+    configs_root = Path("/etc/myapp")
+
+    # Source definition dictates precedence.
+    # In this case ENV values will override JSON values.
+    sources = [
+        JSONSource(configs_root / "config.json"),
+        ENVSource(envs_prefix, configs_root),
+    ]
+
+    # Load config
+    config = Config(schema, sources)
+
+
+    config.get("integer")
+    # 1
+
+    config.get("float")
+    # 2.2
+
+    config.get("bool")
+    # False
+
+    config.get("list")
+    # ['e', 'n', 'v']
+
+    config.get("nested.string")
+    # 'loaded from env'
+
+    config.get("string")
+    # 'loaded from json'
+
+    config.get("nested")
+    # {'nested': 'loaded from env'}
+
+
+"""
 from __future__ import annotations
 
 import os
@@ -5,14 +100,35 @@ import json
 import difflib
 
 from abc import ABC, abstractmethod
-from typing import Generic, Any, TypeVar
+from typing import Generic, Any, Iterable, TypeAlias, TypeVar
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 
+__all__ = [
+    "Config",
+    "ConfigSchema",
+    "ConfigSource",
+    "ConfigDef",
+    "FORMATTERS",
+    "JSONSource",
+    "ENVSource",
+    "LCDict",
+    "flatten",
+    "closest_formatter",
+    "get_formatter",
+    "InvalidConfigValue",
+    "ConfigNotDefined",
+    "AcceptedTypes",
+]
+
+
 _KT = TypeVar("_KT", bound=str)
 _VT = TypeVar("_VT")
+
+
+AcceptedTypes: TypeAlias = int | float | str | bool | list
 
 
 class LCDict(dict, Generic[_KT, _VT]):
@@ -23,6 +139,9 @@ class LCDict(dict, Generic[_KT, _VT]):
 
     def __getitem__(self, key: _KT):
         return super().__getitem__(key.lower())
+
+    def __contains__(self, key: _KT):
+        return key.lower() in self.keys()
 
 
 def flatten(dict_: dict, base_path: str = "") -> dict:
@@ -43,7 +162,9 @@ def flatten(dict_: dict, base_path: str = "") -> dict:
 
 
 class ConfigSource(ABC):
-    """Children of ConfigSource should implement `_load_data()` returning a
+    """Base class for config sources.
+
+    All ConfigSource's must implement `_load_data()` returning a
     1-dimensional mapping of `path: value`."""
 
     def __init__(self):
@@ -59,7 +180,22 @@ class ConfigSource(ABC):
 
 
 class JSONSource(ConfigSource):
-    """Loads configs from a JSON file."""
+    """Loads configs from a JSON file.
+
+    The JSON data does not need to be flat.
+    For example,
+
+    .. code:: json
+
+        {"parent": {"child": "value"}}
+
+    is the same as
+
+    .. code:: json
+
+        {"parent.child": "value"}
+
+    """
 
     def __init__(self, file: Path):
         self.file = file
@@ -74,11 +210,11 @@ class JSONSource(ConfigSource):
 
 
 class ENVSource(ConfigSource):
-    """Parses config values from environment variables.
+    """Loads configs from environment variables.
 
-    Also loads envvars from '.env' files in `root`.
+    Also loads envvars from ``.env`` files in `root`.
 
-    Always tries to load '.env'. Additionally tries to loads '.env.{name}' files
+    Always tries to load ``.env``. Additionally tries to loads ``.env.{name}`` files
     for all names in `envs`.
 
     Only environment variables that start with `prefix` will be loaded."""
@@ -132,6 +268,7 @@ def _bool_formatter(value):
     return bool(value)
 
 
+#: All available formaters.
 FORMATTERS = {
     "int": int,
     "string": str,
@@ -141,7 +278,8 @@ FORMATTERS = {
 }
 
 
-def _closest_formatter(format: str):
+def closest_formatter(format: str):
+    """Returns a formatter recommendation for error messages."""
     out = 0, None
     for option in FORMATTERS.keys():
         ratio = difflib.SequenceMatcher(None, format, option).ratio()
@@ -150,31 +288,33 @@ def _closest_formatter(format: str):
     return out[1]
 
 
-def _get_formatter(format: str):
+def get_formatter(format: str):
+    """Returns a formatter given it's name."""
     if format in FORMATTERS.keys():
         return FORMATTERS[format]
-    closest = _closest_formatter(format)
+    closest = closest_formatter(format)
     hint = f" Did you mean '{closest}'?" if closest else ""
     raise ValueError(f"Invalid config formatter: '{format}'.{hint}")
 
 
 class ConfigDef:
+    """Stores Config Definition attributes for the :class:`ConfigSchema`."""
+
     def __init__(self, path: str, doc: str, format: str, default: Any):
         self.path = path
         self.doc = doc
-        self.format = _get_formatter(format)
+        self.format = get_formatter(format)
         self.default = default
 
 
 class ConfigSchema:
-    """Loads Configuration Schema. This schema defines the available configs, and some attributes like
-    default, format and help."""
+    """Stores all available configs and their attributes (as :class:`ConfigDef` s)."""
 
     def __init__(self, data: dict):
-        self.schema: LCDict = self._load(data)
+        self.schema: LCDict[str, ConfigDef] = self._load(data)
 
     def __getitem__(self, path: str) -> Any:
-        if path in self.schema.keys():
+        if path in self.schema:
             return self.schema[path]
         raise ConfigNotDefined(f"'{path}' not defined in the config schema.")
 
@@ -184,34 +324,36 @@ class ConfigSchema:
             output[path] = ConfigDef(path=path, **definition)
         return output
 
-    def format_value(self, path: str, value: Any) -> Any:
-        return self.schema[path].format(value)
-
-    def keys(self):
+    def keys(self) -> Iterable[str]:
+        """Returns all config names."""
         return self.schema.keys()
 
-    def items(self):
+    def items(self) -> Iterable[tuple[str, ConfigDef]]:
+        """Returns iterable of all configs in the schema."""
         return self.schema.items()
 
-    def defaults(self):
+    def defaults(self) -> dict:
+        """Returns deep tree of default configs."""
         defaults = {}
         for path, def_ in self.items():
             _add_path_to_tree(defaults, path, def_.default)
         return defaults
 
 
-def _merge_sources_and_format(
-    schema: ConfigSchema, sources: list[ConfigSource]
-) -> LCDict:
-    data = LCDict()
-    for config in sources:
-        for path, value in config.items():
-            formatted = schema.format_value(path, value)
-            data[path.lower()] = formatted
-    return data
-
-
 def _add_path_to_tree(tree: dict, path: str, value: Any):
+    """Adds a dot concatenated path and its value to a deep tree.
+
+    >>> (d := _add_path_to_tree({}, "nested.first", 1))
+    {'nested': {'first': 1}}
+    >>> (d := _add_path_to_tree(d, "nested.second", 2))
+    {'nested': {'first': 1, 'second': 2}}
+    >>> (d := _add_path_to_tree(d, "nested.deep.first", "value"))
+    {'nested': {'first': 1, 'second': 2, 'deep': {'first': 'value'}}}
+    >>> (d := _add_path_to_tree(d, "top", True))
+    {'nested': {'first': 1, 'second': 2, 'deep': {'first': 'value'}}, 'top': True}
+    >>> (d := _add_path_to_tree(d, "top", False))
+    {'nested': {'first': 1, 'second': 2, 'deep': {'first': 'value'}}, 'top': False}
+    """
     curnode = tree
     parts = path.split(".")
     for part in parts[:-1]:
@@ -226,9 +368,19 @@ class Config:
     def __init__(self, schema, sources: list[ConfigSource] | None = None):
         self.sources = sources or []
         self.schema = ConfigSchema(schema)
-        self.data: LCDict = _merge_sources_and_format(self.schema, self.sources)
+        self.data: LCDict[str, AcceptedTypes] = self._merge_sources_and_format()
 
-    def get(self, path: str) -> Any:
+    def get(self, path: str) -> AcceptedTypes | dict:
+        """Returns value for config `path` looking at, in order:
+
+            - Data loaded from sources
+            - Schema defaults
+
+        If `path` is not an exact match (e.g `a.b` when `a.b.c` and `a.b.d` exists)
+        a deep tree containing all child values will be returned.
+
+        NameError is raised if `path` is not found.
+        """
         path = path.lower()
         if path in self.data.keys():
             return self.data[path]
@@ -238,14 +390,25 @@ class Config:
             return self._get_tree(path)
         raise NameError(path)
 
-    def _get_tree(self, path: str):
+    def _get_tree(self, path_prefix: str) -> dict:
+        """Builds a deep tree with all configs that start with `path_prefix`."""
         tree = {}
         for name, def_ in self.schema.items():
-            if name.startswith(path):
+            if name.startswith(path_prefix):
                 value = self.data.get(name, def_.default)
-                subpath = name[len(path) + 1 :]  # +1 accounts for last '.'
+                subpath = name[len(path_prefix) + 1 :]  # +1 accounts for last '.'
                 tree = _add_path_to_tree(tree, subpath, value)
         return tree
+
+    def _merge_sources_and_format(self) -> LCDict[str, AcceptedTypes]:
+        """Merges configs loaded from multiple ConfigSources into a single,
+        flat :class:`LCDict`. Values are formatted at this point."""
+        data = LCDict()
+        for config in self.sources:
+            for path, value in config.items():
+                formatted = self.schema[path].format(value)
+                data[path.lower()] = formatted
+        return data
 
 
 class InvalidConfigValue(ValueError):

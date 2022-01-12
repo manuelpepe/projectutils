@@ -7,6 +7,15 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 
 
+__all__ = [
+    "Tree",
+    "Directory",
+    "File",
+    "Node",
+    "chdir",
+]
+
+
 class chdir(AbstractContextManager):
     """Non thread-safe context manager to change the current working directory.
     In the future replace with built-in version: https://github.com/python/cpython/pull/28271"""
