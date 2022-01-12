@@ -1,5 +1,10 @@
 # projectutils
 
+[![Documentation Status](https://readthedocs.org/projects/projectutils/badge/?version=latest)](https://projectutils.readthedocs.io/en/latest/?badge=latest)
+[![Unit Tests](https://github.com/manuelpepe/projectutils/actions/workflows/tests.yml/badge.svg)](https://github.com/manuelpepe/projectutils/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/manuelpepe/projectutils/branch/main/graph/badge.svg?token=6Hjb772RWB)](https://codecov.io/gh/manuelpepe/projectutils)
+
+
 A small collections of modular components useful in other projects.
 
 
