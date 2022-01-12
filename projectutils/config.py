@@ -236,7 +236,7 @@ class Config:
             return self.schema[path].default
         if any(name.startswith(path) and name != path for name in self.schema.keys()):
             return self._get_tree(path)
-        return self.schema[path].default
+        raise NameError(path)
 
     def _get_tree(self, path: str):
         tree = {}

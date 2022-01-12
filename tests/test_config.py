@@ -1,3 +1,4 @@
+import os
 import json
 
 from pathlib import Path
@@ -14,12 +15,16 @@ SCHEMA = {
     "float": {"doc": "Float config", "format": "float", "default": 1.1},
     "list": {"doc": "List config", "format": "list", "default": ["a", "b", "c"]},
     "bool": {"doc": "Bool config", "format": "bool", "default": True},
-    "nested.config": {"doc": "nested", "format": "string", "default": ""},
-    "deeply.nested.config": {"doc": "deeply nested", "format": "string", "default": ""},
+    "nested.config": {"doc": "nested", "format": "string", "default": "DEFAULT"},
+    "deeply.nested.config": {
+        "doc": "deeply nested",
+        "format": "string",
+        "default": "DEFAULT",
+    },
     "deeply.nested.configtwo": {
         "doc": "deeply nested with multiple values",
         "format": "string",
-        "default": "",
+        "default": "DEFAULT",
     },
 }
 
@@ -99,3 +104,34 @@ def test_single_json_source(chtmp, config):
         configfile.write_text(json.dumps(VALUES_FOR_JSON))
         cfg = Config(SCHEMA, [JSONSource(configfile)])
         assert cfg.get(key) == expected
+
+
+def test_get_default_tree():
+    cfg = Config(SCHEMA)
+    assert cfg.get("deeply") == {
+        "nested": {"config": "DEFAULT", "configtwo": "DEFAULT"}
+    }
+
+
+def test_get_mixed_tree(chtmp):
+    with chtmp():
+        prefix = "TEST_CONF_"
+        os.environ[f"{prefix}DEEPLY_NESTED_CONFIGTWO"] = "loaded from env"
+        cfg = Config(SCHEMA, [ENVSource(prefix, Path())])
+        assert cfg.get("deeply") == {
+            "nested": {"config": "DEFAULT", "configtwo": "loaded from env"}
+        }
+
+
+def test_get_mixed_source_tree(chtmp):
+    prefix = "TEST_CONF_"
+    with chtmp() as cwd:
+        os.environ[f"{prefix}DEEPLY_NESTED_CONFIGTWO"] = "loaded from env"
+        configfile: Path = cwd / "config.json"
+        configfile.write_text(
+            '{"deeply": {"nested": {"config": "loaded from json"} } }'
+        )
+        cfg = Config(SCHEMA, [JSONSource(configfile), ENVSource(prefix, cwd)])
+        assert cfg.get("deeply") == {
+            "nested": {"config": "loaded from json", "configtwo": "loaded from env"}
+        }
