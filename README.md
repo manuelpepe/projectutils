@@ -15,6 +15,28 @@ The `init` module is helpful when you need to create a complex directory structu
 You can create objects that represent Directories and Files to create a tree.
 
 
+```python
+from pathlib import Path
+from projectutils.init import Tree, Directory, File
+
+
+tree = Tree([
+    Directory("dir1"),
+    Directory("dir2", [
+        File("file.txt", "file content")
+    ])
+])
+
+tree.create(Path("~/project").expanduser())
+
+# $ tree ~/project
+# ~/project
+# ├── dir1
+# └── dir2
+#     └── file.txt
+```
+
+
 ## projectutils.config
 
 The `config` module allows you to define a configuration schema and dinamically load configurations
@@ -58,23 +80,21 @@ MYAPP_CONF_NESTED_STRING="loaded from env"
 ```python
 import json
 from pathlib import Path
-from projectutils.config import Config, ENVSource, JSONSource
+from projectutils.config import Config, ENVSource, JSONSource, ConfigSchema
 
 
-# Setup includes loading the schema
-# and defining some params used in sources.
-with open("schema.json", "r") as fp:
-    schema = json.load(fp)
+# Load schema
+schema = ConfigSchema.from_json_file("schema.json")
 
+# Define Sources
 envs_prefix = "MYAPP_CONF_"
 configs_root = Path("/etc/myapp")
-
-# Source definition dictates precedence.
-# In this case ENV values will override JSON values.
 sources = [
     JSONSource(configs_root / "config.json"),
     ENVSource(envs_prefix, configs_root),
 ]
+# Source definition dictates precedence.
+# In this case ENV values will override JSON values.
 
 # Load config
 config = Config(schema, sources)
