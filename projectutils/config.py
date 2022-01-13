@@ -103,6 +103,7 @@ from abc import ABC, abstractmethod
 from typing import Generic, Any, Iterable, TypeAlias, TypeVar
 from pathlib import Path
 
+import rst
 from dotenv import load_dotenv
 
 
@@ -303,7 +304,8 @@ class ConfigDef:
     def __init__(self, path: str, doc: str, format: str, default: Any):
         self.path = path
         self.doc = doc
-        self.format = get_formatter(format)
+        self.format = format
+        self.formatter = get_formatter(format)
         self.default = default
 
 
@@ -317,6 +319,11 @@ class ConfigSchema:
         if path in self.schema:
             return self.schema[path]
         raise ConfigNotDefined(f"'{path}' not defined in the config schema.")
+
+    @classmethod
+    def from_json_file(cls, file: str | Path) -> ConfigSchema:
+        data = json.loads(Path(file).read_text())
+        return ConfigSchema(data)
 
     def _load(self, data: dict) -> LCDict[str, ConfigDef]:
         output = LCDict()
@@ -365,9 +372,9 @@ def _add_path_to_tree(tree: dict, path: str, value: Any):
 class Config:
     """Readonly config interface. Loads and merges config data from multiple sources."""
 
-    def __init__(self, schema, sources: list[ConfigSource] | None = None):
+    def __init__(self, schema: ConfigSchema, sources: list[ConfigSource] | None = None):
         self.sources = sources or []
-        self.schema = ConfigSchema(schema)
+        self.schema = schema
         self.data: LCDict[str, AcceptedTypes] = self._merge_sources_and_format()
 
     def get(self, path: str) -> AcceptedTypes | dict:
@@ -406,9 +413,64 @@ class Config:
         data = LCDict()
         for config in self.sources:
             for path, value in config.items():
-                formatted = self.schema[path].format(value)
+                formatted = self.schema[path].formatter(value)
                 data[path.lower()] = formatted
         return data
+
+
+def generate_docs(schema: ConfigSchema) -> str:
+    """Generate RST text that documents `schema`.
+
+    >>> data = {"app.email": {"doc": "some help", "format": "string", "default": ""},\
+                "app.user": {"doc": "other help", "format": "string", "default": "admin"}}
+    >>> schema = ConfigSchema(data)
+    >>> print(generate_docs(schema))
+    ========================
+    Available configurations
+    ========================
+    <BLANKLINE>
+    .. list-table:: All Configs
+        :header-rows: 1
+    <BLANKLINE>
+        * -  Path
+          -  Format
+          -  Default
+          -  Help
+        * -  app.email
+          -  string
+          -  ``''``
+          -  some help
+        * -  app.user
+          -  string
+          -  admin
+          -  other help
+    <BLANKLINE>
+    <BLANKLINE>
+    All Defaults
+    ############
+    <BLANKLINE>
+    .. code-block:: json
+    <BLANKLINE>
+        {
+            "app": {
+                "email": "",
+                "user": "admin"
+            }
+        }
+    <BLANKLINE>
+    """
+    doc = rst.Document("Available configurations")
+    tbl = rst.Table("All Configs", ["Path", "Format", "Default", "Help"])
+    for _, data in schema.items():
+        tbl.add_item((data.path, data.format, data.default or "``''``", data.doc))
+    doc.add_child(tbl)
+    out = doc.get_rst()
+    out += "\n\nAll Defaults\n############\n\n"
+    out += ".. code-block:: json\n\n"
+    defaults = json.dumps(schema.defaults(), indent=4)
+    out += "\n".join(f"    {line}" for line in defaults.split("\n"))
+    out += "\n"
+    return out
 
 
 class InvalidConfigValue(ValueError):

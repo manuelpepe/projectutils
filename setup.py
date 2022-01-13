@@ -17,6 +17,6 @@ setup(
     url="https://github.com/manuelpepe/projectutils",
     include_package_data=True,
     packages=["projectutils"],
-    install_requires=["python-dotenv"],
+    install_requires=["python-dotenv", "rst==0.1"],
     extras_require={"toml": ["toml"]},
 )
