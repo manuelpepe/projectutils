@@ -8,7 +8,7 @@ with open(README) as fp:
 
 setup(
     name="projectutils",
-    version="1.1",
+    version="1.2",
     description="A small collections of modular components useful in other projects.",
     long_description=long_description,
     long_description_content_type="text/markdown",
